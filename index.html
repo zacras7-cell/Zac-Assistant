@@ -288,6 +288,7 @@ label{font-size:11px;color:var(--muted);display:block;margin-bottom:4px;letter-s
 ::-webkit-scrollbar{width:4px;}
 ::-webkit-scrollbar-thumb{background:var(--b2);border-radius:2px;}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 <div class="app">
@@ -629,6 +630,18 @@ label{font-size:11px;color:var(--muted);display:block;margin-bottom:4px;letter-s
 </div>
 <div class="toast" id="toast"></div>
 
+<!-- LOGIN GATE -->
+<div id="login-gate" style="position:fixed;inset:0;z-index:9999;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:24px">
+  <div style="max-width:340px;width:100%;text-align:center">
+    <div style="font-family:Syne,sans-serif;font-weight:800;font-size:26px;color:var(--grn)">ZAC</div>
+    <div style="font-size:10px;color:var(--muted);letter-spacing:.5px;margin-bottom:20px">daily assistant</div>
+    <p style="color:var(--muted);font-size:12px;margin-bottom:16px">Sign in to sync your data across devices</p>
+    <input type="email" id="login-email" placeholder="your@email.com" style="margin-bottom:10px;text-align:center" autocomplete="email">
+    <button class="btn" id="login-btn" style="width:100%;justify-content:center" onclick="sendMagicLink()">Email me a login link</button>
+    <div id="login-msg" style="font-size:11px;color:var(--grn);margin-top:14px;min-height:16px;line-height:1.5"></div>
+  </div>
+</div>
+
 <script>
 // ─── CONSTANTS ───────────────────────────────────────────────────────────────
 const CAL_TARGET = 3800;
@@ -692,7 +705,37 @@ const IDX_NAMES = {'^GSPC':'S&P 500','^IXIC':'Nasdaq','^AXJO':'ASX 200','^DJI':'
 // ─── STORAGE ─────────────────────────────────────────────────────────────────
 function todayKey(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function ld(k,def){try{const v=localStorage.getItem(k);return v!==null?JSON.parse(v):def;}catch{return def;}}
-function sv(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){console.warn(e);}}
+function sv(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){console.warn(e);}cloudPush(k,v);}
+
+// ─── SUPABASE CLOUD SYNC ─────────────────────────────────────────────────────
+const SUPA_URL='https://yzhwsxtneatyaxiipodc.supabase.co';
+const SUPA_KEY='sb_publishable_PtFmuj3uHqf-doo-gvM10Q_rc7uAO83';
+const SB=window.supabase.createClient(SUPA_URL,SUPA_KEY);
+let cloudReady=false;
+// push one key up to the cloud (called automatically on every save)
+async function cloudPush(k,v){
+  if(!cloudReady)return;
+  try{await SB.from('kv_store').upsert({key:k,value:v,updated_at:new Date().toISOString()});}
+  catch(e){console.warn('cloud push failed',e);}
+}
+// two-way merge on login/refresh: cloud wins for keys it has, local-only keys get pushed up
+async function mergeSync(){
+  let cloud={};
+  try{
+    const {data,error}=await SB.from('kv_store').select('key,value');
+    if(error){console.warn('hydrate error',error);}else{(data||[]).forEach(r=>cloud[r.key]=r.value);}
+  }catch(e){console.warn('hydrate failed',e);return;}
+  // cloud -> local
+  Object.entries(cloud).forEach(([k,v])=>{try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}});
+  // local-only -> cloud (seeds the cloud the first time you log in on a device that already has data)
+  const up=[];
+  for(let i=0;i<localStorage.length;i++){
+    const k=localStorage.key(i);
+    if(k==='chk_exp')continue; // UI-only state, no need to sync
+    if(!(k in cloud)){let v;try{v=JSON.parse(localStorage.getItem(k));}catch{v=localStorage.getItem(k);}up.push({key:k,value:v,updated_at:new Date().toISOString()});}
+  }
+  if(up.length){try{await SB.from('kv_store').upsert(up);}catch(e){console.warn('seed failed',e);}}
+}
 
 // ─── NAV ─────────────────────────────────────────────────────────────────────
 function nav(name){
@@ -1670,7 +1713,34 @@ function init(){
   renderDashQuote();
   const wlogs=ld('w_log',[]);if(wlogs.length)document.getElementById('d-weight').textContent=wlogs[wlogs.length-1].val.toFixed(1)+' kg';
 }
-init();
+
+// ─── AUTH GATE + BOOT ────────────────────────────────────────────────────────
+let booted=false;
+async function afterLogin(){
+  if(booted)return;booted=true;
+  document.getElementById('login-gate').style.display='none';
+  await mergeSync();      // pull cloud down + seed cloud from this device
+  cloudReady=true;        // from now on, every save also pushes up
+  init();                 // render the app
+}
+async function sendMagicLink(){
+  const email=document.getElementById('login-email').value.trim();
+  const msg=document.getElementById('login-msg');
+  if(!email){msg.style.color='var(--red)';msg.textContent='Enter your email first.';return;}
+  const btn=document.getElementById('login-btn');btn.classList.add('loading');btn.textContent='Sending...';
+  const {error}=await SB.auth.signInWithOtp({email,options:{emailRedirectTo:window.location.origin+window.location.pathname}});
+  btn.classList.remove('loading');btn.textContent='Email me a login link';
+  if(error){msg.style.color='var(--red)';msg.textContent='Error: '+error.message;}
+  else{msg.style.color='var(--grn)';msg.textContent='Check your email for the login link, then come back here.';}
+}
+// fires on page load, after clicking the magic link, and on token refresh
+SB.auth.onAuthStateChange((event,session)=>{if(session)afterLogin();});
+SB.auth.getSession().then(({data})=>{
+  if(data.session)afterLogin();
+  else document.getElementById('login-gate').style.display='flex';
+});
+// re-sync whenever you switch back to the tab (picks up changes made by the bot)
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&cloudReady){mergeSync().then(()=>init());}});
 </script>
 </body>
 </html>

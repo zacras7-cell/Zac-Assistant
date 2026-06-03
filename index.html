@@ -712,9 +712,11 @@ const SUPA_URL='https://yzhwsxtneatyaxiipodc.supabase.co';
 const SUPA_KEY='sb_publishable_PtFmuj3uHqf-doo-gvM10Q_rc7uAO83';
 const SB=window.supabase.createClient(SUPA_URL,SUPA_KEY);
 let cloudReady=false;
+// only sync real app data — never Supabase's own session token or UI-only state
+function isSyncable(k){return k!=='chk_exp' && !k.startsWith('sb-');}
 // push one key up to the cloud (called automatically on every save)
 async function cloudPush(k,v){
-  if(!cloudReady)return;
+  if(!cloudReady||!isSyncable(k))return;
   try{await SB.from('kv_store').upsert({key:k,value:v,updated_at:new Date().toISOString()});}
   catch(e){console.warn('cloud push failed',e);}
 }
@@ -726,12 +728,12 @@ async function mergeSync(){
     if(error){console.warn('hydrate error',error);}else{(data||[]).forEach(r=>cloud[r.key]=r.value);}
   }catch(e){console.warn('hydrate failed',e);return;}
   // cloud -> local
-  Object.entries(cloud).forEach(([k,v])=>{try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}});
+  Object.entries(cloud).forEach(([k,v])=>{if(!isSyncable(k))return;try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}});
   // local-only -> cloud (seeds the cloud the first time you log in on a device that already has data)
   const up=[];
   for(let i=0;i<localStorage.length;i++){
     const k=localStorage.key(i);
-    if(k==='chk_exp')continue; // UI-only state, no need to sync
+    if(!isSyncable(k))continue; // skip UI-only state and Supabase's own session token
     if(!(k in cloud)){let v;try{v=JSON.parse(localStorage.getItem(k));}catch{v=localStorage.getItem(k);}up.push({key:k,value:v,updated_at:new Date().toISOString()});}
   }
   if(up.length){try{await SB.from('kv_store').upsert(up);}catch(e){console.warn('seed failed',e);}}

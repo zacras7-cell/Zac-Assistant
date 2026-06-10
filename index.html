@@ -302,6 +302,7 @@ label{font-size:11px;color:var(--muted);display:block;margin-bottom:4px;letter-s
   <div class="ni" onclick="nav('training')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4v16M18 4v16M6 12h12M2 7h4M18 7h4M2 17h4M18 17h4"/></svg>Training</div>
   <div class="ns">track</div>
   <div class="ni" onclick="nav('journal')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>Journal</div>
+  <div class="ni" onclick="nav('notes')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M9 11h6M9 15h4"/></svg>Notes</div>
   <div class="ni" onclick="nav('weight')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Weight</div>
   <div class="ns">more</div>
   <div class="ni" onclick="nav('goals')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>Goals</div>
@@ -626,6 +627,22 @@ label{font-size:11px;color:var(--muted);display:block;margin-bottom:4px;letter-s
   </div>
 </div>
 
+<!-- ========== NOTES ========== -->
+<div class="view" id="view-notes">
+  <div class="ph"><h1>Notes &amp; reminders</h1><p>Quick captures — no date needed. Message your bot "note: ..." and it appears here.</p></div>
+  <div class="card">
+    <div class="ct">Add a note</div>
+    <div class="ai-wrap">
+      <textarea id="note-inp" placeholder="Something to remember or look at later..."></textarea>
+      <button class="btn sm" onclick="addNote()">Add</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="ct">Your notes <span id="note-count" style="color:var(--muted)"></span></div>
+    <div id="notes-list"><div style="color:var(--muted);font-size:12px">No notes yet.</div></div>
+  </div>
+</div>
+
 </main>
 </div>
 <div class="toast" id="toast"></div>
@@ -636,9 +653,11 @@ label{font-size:11px;color:var(--muted);display:block;margin-bottom:4px;letter-s
     <div style="font-family:Syne,sans-serif;font-weight:800;font-size:26px;color:var(--grn)">ZAC</div>
     <div style="font-size:10px;color:var(--muted);letter-spacing:.5px;margin-bottom:20px">daily assistant</div>
     <p style="color:var(--muted);font-size:12px;margin-bottom:16px">Sign in to sync your data across devices</p>
-    <input type="email" id="login-email" placeholder="your@email.com" style="margin-bottom:10px;text-align:center" autocomplete="email">
-    <button class="btn" id="login-btn" style="width:100%;justify-content:center" onclick="sendMagicLink()">Email me a login link</button>
-    <div id="login-msg" style="font-size:11px;color:var(--grn);margin-top:14px;min-height:16px;line-height:1.5"></div>
+    <input type="email" id="login-email" placeholder="your@email.com" style="margin-bottom:8px;text-align:center" autocomplete="email">
+    <input type="password" id="login-pw" placeholder="password" style="margin-bottom:10px;text-align:center" autocomplete="current-password" onkeydown="if(event.key==='Enter')loginPassword()">
+    <button class="btn" id="login-btn" style="width:100%;justify-content:center" onclick="loginPassword()">Log in</button>
+    <div style="font-size:11px;color:var(--muted);margin-top:10px">First time? <a href="#" onclick="signupPassword();return false;" style="color:var(--grn)">Create an account</a></div>
+    <div id="login-msg" style="font-size:11px;color:var(--grn);margin-top:12px;min-height:16px;line-height:1.5"></div>
   </div>
 </div>
 
@@ -752,6 +771,7 @@ function nav(name){
   if(name==='books'){renderBooks();renderBookStats();}
   if(name==='goals'){renderGoals();renderGoalStreak();}
   if(name==='review'){generateReview();renderPastReviews();}
+  if(name==='notes')renderNotes();
 }
 
 // ─── DATE / GREETING ─────────────────────────────────────────────────────────
@@ -1716,6 +1736,26 @@ function init(){
   const wlogs=ld('w_log',[]);if(wlogs.length)document.getElementById('d-weight').textContent=wlogs[wlogs.length-1].val.toFixed(1)+' kg';
 }
 
+// ─── NOTES ───────────────────────────────────────────────────────────────────
+function escNote(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function renderNotes(){
+  const notes=ld('notes',[]);
+  const el=document.getElementById('notes-list');if(!el)return;
+  const open=notes.filter(n=>!n.done), done=notes.filter(n=>n.done);
+  const cnt=document.getElementById('note-count');if(cnt)cnt.textContent=open.length?open.length+' open':'';
+  if(!notes.length){el.innerHTML='<div style="color:var(--muted);font-size:12px">No notes yet.</div>';return;}
+  const row=n=>'<div class="ci-wrap"><div class="ci'+(n.done?' done':'')+'" onclick="toggleNote('+n.id+')"><div class="cb"><svg viewBox="0 0 24 24" fill="none" stroke="#0d0d0d" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><div class="cl">'+escNote(n.text)+'</div><span class="cev-del" onclick="event.stopPropagation();delNote('+n.id+')">×</span></div></div>';
+  el.innerHTML=open.map(row).join('')+(done.length?'<div style="font-size:10px;color:var(--muted);margin:12px 0 4px;letter-spacing:1px">DONE</div>'+done.map(row).join(''):'');
+}
+function addNote(){
+  const inp=document.getElementById('note-inp');const t=inp.value.trim();
+  if(!t){toast('Write a note first.');return;}
+  const notes=ld('notes',[]);notes.unshift({id:Date.now(),text:t,done:false,ts:Date.now()});
+  sv('notes',notes);inp.value='';renderNotes();toast('Note added.');
+}
+function toggleNote(id){const notes=ld('notes',[]);const n=notes.find(x=>x.id===id);if(n)n.done=!n.done;sv('notes',notes);renderNotes();}
+function delNote(id){sv('notes',ld('notes',[]).filter(x=>x.id!==id));renderNotes();}
+
 // ─── AUTH GATE + BOOT ────────────────────────────────────────────────────────
 let booted=false;
 async function afterLogin(){
@@ -1725,15 +1765,22 @@ async function afterLogin(){
   cloudReady=true;        // from now on, every save also pushes up
   init();                 // render the app
 }
-async function sendMagicLink(){
-  const email=document.getElementById('login-email').value.trim();
-  const msg=document.getElementById('login-msg');
-  if(!email){msg.style.color='var(--red)';msg.textContent='Enter your email first.';return;}
-  const btn=document.getElementById('login-btn');btn.classList.add('loading');btn.textContent='Sending...';
-  const {error}=await SB.auth.signInWithOtp({email,options:{emailRedirectTo:window.location.origin+window.location.pathname}});
-  btn.classList.remove('loading');btn.textContent='Email me a login link';
-  if(error){msg.style.color='var(--red)';msg.textContent='Error: '+error.message;}
-  else{msg.style.color='var(--grn)';msg.textContent='Check your email for the login link, then come back here.';}
+function _creds(){return {email:document.getElementById('login-email').value.trim(), password:document.getElementById('login-pw').value};}
+async function loginPassword(){
+  const {email,password}=_creds();const msg=document.getElementById('login-msg');
+  if(!email||!password){msg.style.color='var(--red)';msg.textContent='Enter your email and password.';return;}
+  const btn=document.getElementById('login-btn');btn.classList.add('loading');btn.textContent='Logging in...';
+  const {error}=await SB.auth.signInWithPassword({email,password});
+  btn.classList.remove('loading');btn.textContent='Log in';
+  if(error){msg.style.color='var(--red)';msg.textContent=error.message;}
+}
+async function signupPassword(){
+  const {email,password}=_creds();const msg=document.getElementById('login-msg');
+  if(!email||!password){msg.style.color='var(--red)';msg.textContent='Enter an email and a password (6+ characters) to create your account.';return;}
+  const {data,error}=await SB.auth.signUp({email,password});
+  if(error){msg.style.color='var(--red)';msg.textContent=error.message;return;}
+  if(data&&data.session){msg.style.color='var(--grn)';msg.textContent='Account created — logging you in...';}
+  else{msg.style.color='var(--grn)';msg.textContent='Account created. If asked, confirm your email then log in.';}
 }
 // fires on page load, after clicking the magic link, and on token refresh
 SB.auth.onAuthStateChange((event,session)=>{if(session)afterLogin();});
